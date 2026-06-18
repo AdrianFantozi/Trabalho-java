@@ -66,4 +66,7 @@ public class Usuario {
     public String toString() {
         return "Usuario{id=" + id + ", nome=" + nome + ", pts=" + pontuacao + "}";
     }
+
+    public void setId(String id) { this.id = id; }
+    public void setPontuacao(int pontuacao) { this.pontuacao = pontuacao; }
 }

@@ -4,7 +4,10 @@ import java.io.*;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Scanner;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.ResultSet;
 
 public class MainGUI extends JFrame {
 
@@ -33,36 +36,19 @@ public class MainGUI extends JFrame {
         redirecionarConsole();
         iniciarCarregamento();
     }
-    //carrega o save do ultimo encerramenti di programa
+
     private void iniciarCarregamento() {
 
-        carregarBackupTXT();
+        carregarDadosDoBanco();
 
         new Thread(() -> {
-            try {
-                Thread.sleep(2000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-
+            try { Thread.sleep(2000); } catch (InterruptedException e) { e.printStackTrace(); }
             SwingUtilities.invokeLater(() -> {
-                consoleArea.setText("olá, programa pronto para utilização\n\n");
-
-
+                consoleArea.setText("olá, programa pronto para utilização com H2 Database\n\n");
             });
         }).start();
     }
 
-    //Logica de criamento do save
-    //O save é composto pelo LOG de todas as ações feitas
-
-    private void registrarLog(String linha) {
-        try (FileWriter fw = new FileWriter("dados_bolao.txt", true);
-             BufferedWriter bw = new BufferedWriter(fw);
-             PrintWriter out = new PrintWriter(bw)) {
-            out.println(linha);
-        } catch (Exception e) { e.printStackTrace(); }
-    }
 
     private void processarCriarCampeonato(String nome, boolean restaurando) {
         campeonato = new Campeonato(nome);
@@ -73,7 +59,7 @@ public class MainGUI extends JFrame {
         txtNomeCamp.setEnabled(false);
 
         if(!restaurando) {
-            registrarLog("CAMP;" + nome);
+            salvarCampeonatoNoBanco(nome);
             System.out.println("Campeonato '" + campeonato.getNome() + "' iniciado!");
         }
     }
@@ -83,7 +69,9 @@ public class MainGUI extends JFrame {
         if (campeonato.adicionarTime(nome)) {
             cbTimeMandante.addItem(nome); cbTimeVisitante.addItem(nome);
             if(cbExcluirTime != null) cbExcluirTime.addItem(nome);
-            if(!restaurando) registrarLog("TIME;" + nome);
+            if(!restaurando) {
+                salvarTimeNoBanco(nome);
+            }
         }
     }
 
@@ -93,8 +81,9 @@ public class MainGUI extends JFrame {
         cbGrupoIngresso.addItem(g.getNome());
         cbGruposClassificacao.addItem(g.getNome());
         if(cbExcluirGrupo != null) cbExcluirGrupo.addItem(g.getNome());
+
         if(!restaurando) {
-            registrarLog("GRUPO;" + nome);
+            salvarGrupoNoBanco(g);
             System.out.println("Grupo '" + nome + "' criado com sucesso!");
         }
     }
@@ -107,7 +96,10 @@ public class MainGUI extends JFrame {
         cbUsuariosAposta.addItem(labelUser);
         if(cbExcluirUsuario != null) cbExcluirUsuario.addItem(labelUser);
         u.ingressar(grupos[indexGrupo]);
-        if(!restaurando) registrarLog("USER;" + nome + ";" + indexGrupo);
+        if(!restaurando) {
+            salvarUsuarioNoBanco(u);
+            salvarMembroGrupoNoBanco(grupos[indexGrupo].getNome(), u.getId());
+        }
     }
 
     private void processarAgendarPartida(String tm, String tv, String dataStr, String horaStr, boolean restaurando) {
@@ -119,17 +111,21 @@ public class MainGUI extends JFrame {
         cbPartidasAposta.addItem(p.getNomePartida()); cbPartidasEncerrar.addItem(p.getNomePartida());
         if(cbExcluirPartida != null) cbExcluirPartida.addItem(p.getNomePartida());
         if(!restaurando) {
-            registrarLog("PARTIDA;" + tm + ";" + tv + ";" + dataStr + ";" + horaStr);
+            salvarPartidaNoBanco(p);
             System.out.println("Partida " + p.getNomePartida() + " agendada!");
         }
     }
 
     private void processarRegistrarAposta(int idxUser, int idxPartida, String timeVencedor, String placar, boolean restaurando) {
         if (totalUsuarios == 0 || totalPartidas == 0) throw new IllegalStateException("Crie usuários e partidas!");
-        Usuario u = usuarios[idxUser]; Partida p = partidas[idxPartida];
+
+        Usuario u = usuarios[idxUser];
+        Partida p = partidas[idxPartida];
         if(!restaurando) System.out.println("\n--- Tentativa de Aposta ---");
-        new Aposta(u, p, grupos, totalGrupos, timeVencedor, placar);
-        if(!restaurando) registrarLog("APOSTA;" + idxUser + ";" + idxPartida + ";" + timeVencedor + ";" + placar);
+        Aposta novaAposta = new Aposta(u, p, grupos, totalGrupos, timeVencedor, placar);
+        if(!restaurando) {
+            salvarApostaNoBanco(novaAposta);
+        }
     }
 
     private void processarEncerrarPartida(int idxPartida, int golsM, int golsV, boolean restaurando) {
@@ -137,7 +133,14 @@ public class MainGUI extends JFrame {
         Partida p = partidas[idxPartida];
         if(!restaurando) System.out.println("\n--- Apito Final ---");
         p.registrarResultado(golsM, golsV);
-        if(!restaurando) registrarLog("ENCERRAR;" + idxPartida + ";" + golsM + ";" + golsV);
+        if(!restaurando) {
+            atualizarPartidaNoBanco(p);
+            for (int i = 0; i < p.getTotalApostas(); i++) {
+                Aposta a = p.getApostas()[i];
+                atualizarApostaNoBanco(a);
+                atualizarPontuacaoUsuarioNoBanco(a.getUsuario());
+            }
+        }
     }
 
     private void processarDelCamp(boolean restaurando) {
@@ -146,8 +149,8 @@ public class MainGUI extends JFrame {
             btnCamp.setEnabled(true); txtNomeCamp.setEnabled(true); txtNomeCamp.setText("");
             cbTimeMandante.removeAllItems(); cbTimeVisitante.removeAllItems(); cbExcluirTime.removeAllItems();
             if(!restaurando) {
+                deletarCampeonatoDoBanco();
                 System.out.println("\n[AVISO] Campeonato excluído. Os times foram resetados!");
-                registrarLog("DEL_CAMP");
             }
         }
     }
@@ -155,7 +158,9 @@ public class MainGUI extends JFrame {
     private void processarDelTime(String time, boolean restaurando) {
         campeonato.removerTime(time);
         cbTimeMandante.removeItem(time); cbTimeVisitante.removeItem(time); cbExcluirTime.removeItem(time);
-        if(!restaurando) registrarLog("DEL_TIME;" + time);
+        if(!restaurando) {
+            deletarTimeDoBanco(time);
+        }
     }
 
     private void processarDelGrupo(int idx, boolean restaurando) {
@@ -164,19 +169,22 @@ public class MainGUI extends JFrame {
         grupos[totalGrupos - 1] = null; totalGrupos--;
         cbGrupoIngresso.removeItemAt(idx); cbGruposClassificacao.removeItemAt(idx); cbExcluirGrupo.removeItemAt(idx);
         if(!restaurando) {
+            deletarGrupoDoBanco(nome);
             System.out.println("\n[AVISO] Grupo '" + nome + "' deletado definitivamente.");
-            registrarLog("DEL_GRUPO;" + idx);
         }
     }
 
     private void processarDelUser(int idx, boolean restaurando) {
+        String idParaDeletar = usuarios[idx].getId();
         String nomeInfo = usuarios[idx].getNome();
+
         for (int i = idx; i < totalUsuarios - 1; i++) usuarios[i] = usuarios[i + 1];
         usuarios[totalUsuarios - 1] = null; totalUsuarios--;
         cbUsuariosAposta.removeItemAt(idx); cbExcluirUsuario.removeItemAt(idx);
+
         if(!restaurando) {
+            deletarUsuarioDoBanco(idParaDeletar);
             System.out.println("\n[AVISO] Usuário '" + nomeInfo + "' removido.");
-            registrarLog("DEL_USER;" + idx);
         }
     }
 
@@ -186,51 +194,83 @@ public class MainGUI extends JFrame {
             if(!restaurando) throw new IllegalStateException("Não exclua uma partida já realizada!");
             return;
         }
+
+        String idParaDeletar = p.getId();
         String nomePartida = p.getNomePartida();
+
         for (int i = idx; i < totalPartidas - 1; i++) partidas[i] = partidas[i + 1];
         partidas[totalPartidas - 1] = null; totalPartidas--;
         cbPartidasAposta.removeItemAt(idx); cbPartidasEncerrar.removeItemAt(idx); cbExcluirPartida.removeItemAt(idx);
+
         if(!restaurando) {
+            deletarPartidaDoBanco(idParaDeletar);
             System.out.println("\n[AVISO] Partida '" + nomePartida + "' removida.");
-            registrarLog("DEL_PARTIDA;" + idx);
         }
     }
 
     //Responsavel por ler o ultimo save
 
-    private void carregarBackupTXT() {
-        File arquivo = new File("dados_bolao.txt");
-        if (!arquivo.exists()) return;
+    private void carregarDadosDoBanco() {
+        System.out.println("=========================================");
+        System.out.println(" CARREGANDO DADOS DO H2 DATABASE...");
+        System.out.println("=========================================");
+
+        carregarGruposDoBanco();
+        carregarUsuariosDoBanco();
+        carregarPartidasDoBanco();
+        carregarApostasDoBanco();
 
         System.out.println("=========================================");
-        System.out.println(" CARREGANDO O ARQUIVO dados_bolao.txt...");
-        System.out.println("=========================================");
-        try (Scanner scanner = new Scanner(arquivo)) {
-            while (scanner.hasNextLine()) {
-                String linha = scanner.nextLine().trim();
-                if (linha.isEmpty()) continue;
-                String[] partes = linha.split(";");
-                try {
-                    switch (partes[0]) {
-                        case "CAMP": processarCriarCampeonato(partes[1], true); break;
-                        case "TIME": processarAdicionarTime(partes[1], true); break;
-                        case "GRUPO": processarCriarGrupo(partes[1], true); break;
-                        case "USER": processarCriarUsuario(partes[1], Integer.parseInt(partes[2]), true); break;
-                        case "PARTIDA": processarAgendarPartida(partes[1], partes[2], partes[3], partes[4], true); break;
-                        case "APOSTA": processarRegistrarAposta(Integer.parseInt(partes[1]), Integer.parseInt(partes[2]), partes[3], partes[4], true); break;
-                        case "ENCERRAR": processarEncerrarPartida(Integer.parseInt(partes[1]), Integer.parseInt(partes[2]), Integer.parseInt(partes[3]), true); break;
-                        case "DEL_CAMP": processarDelCamp(true); break;
-                        case "DEL_TIME": processarDelTime(partes[1], true); break;
-                        case "DEL_GRUPO": processarDelGrupo(Integer.parseInt(partes[1]), true); break;
-                        case "DEL_USER": processarDelUser(Integer.parseInt(partes[1]), true); break;
-                        case "DEL_PARTIDA": processarDelPartida(Integer.parseInt(partes[1]), true); break;
-                    }
-                } catch (Exception ignored) {} // Ignora falhas de linhas corrompidas e continua
+        System.out.println(" BANCO DE DADOS SINCRONIZADO! ");
+        System.out.println("=========================================\n");
+    }
+
+
+    private void carregarGruposDoBanco() {
+        String sql = "SELECT nome FROM grupos";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                String nome = rs.getString("nome");
+                // Usamos o 'true' para que ele não tente salvar no banco novamente
+                processarCriarGrupo(nome, true);
             }
-            System.out.println("=========================================");
-            System.out.println(" DADOS RESTAURADOS COM SUCESSO!");
-            System.out.println("=========================================\n");
-        } catch (Exception e) { System.out.println("Erro ao ler backup."); }
+        } catch (SQLException e) { System.err.println("Erro carregar grupos: " + e.getMessage()); }
+    }
+
+    private void carregarUsuariosDoBanco() {
+        String sql = "SELECT u.id, u.nome, u.pontuacao, m.grupo_nome " +
+                "FROM usuarios u " +
+                "LEFT JOIN membros_grupo m ON u.id = m.usuario_id";
+
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                String id = rs.getString("id");
+                String nome = rs.getString("nome");
+                int pontuacao = rs.getInt("pontuacao");
+                String nomeGrupo = rs.getString("grupo_nome");
+
+                int indexGrupo = 0;
+                for (int i = 0; i < totalGrupos; i++) {
+                    if (grupos[i].getNome().equals(nomeGrupo)) {
+                        indexGrupo = i;
+                        break;
+                    }
+                }
+
+                processarCriarUsuario(nome, indexGrupo, true);
+
+
+                Usuario u = usuarios[totalUsuarios - 1];
+                u.setId(id);
+                u.setPontuacao(pontuacao);
+            }
+        } catch (SQLException e) { System.err.println("Erro carregar usuários: " + e.getMessage()); }
     }
 
     //Montagem da interface
@@ -286,15 +326,8 @@ public class MainGUI extends JFrame {
         panel.add(new JLabel("Palpite Placar (ex: 2x1):")); txtPlacarAposta = novoTextField(10); panel.add(txtPlacarAposta);
         panel.add(new JLabel("Vencedor:")); cbVencedorAposta = novoComboBox(); cbVencedorAposta.addItem("Mandante"); cbVencedorAposta.addItem("Visitante"); cbVencedorAposta.addItem("Empate"); panel.add(cbVencedorAposta);
 
-        JButton btnApostar = new JButton("Registrar Aposta");
-        btnApostar.addActionListener(e -> {
-            try {
-                String esc = (String) cbVencedorAposta.getSelectedItem(); Partida p = partidas[cbPartidasAposta.getSelectedIndex()];
-                String timeVencedor = esc.equals("Mandante") ? p.getTimeMandante() : esc.equals("Visitante") ? p.getTimeVisitante() : "empate";
-                processarRegistrarAposta(cbUsuariosAposta.getSelectedIndex(), cbPartidasAposta.getSelectedIndex(), timeVencedor, txtPlacarAposta.getText().trim(), false); txtPlacarAposta.setText("");
-            } catch (Exception ex) { mostrarErro(ex.getMessage()); }
-        });
-        panel.add(new JLabel()); panel.add(btnApostar);
+        panel.add(new JLabel());
+        panel.add(criarBotaoApostar());
         JPanel wrapper = new JPanel(new BorderLayout()); wrapper.add(panel, BorderLayout.NORTH); return wrapper;
     }
 
@@ -312,7 +345,14 @@ public class MainGUI extends JFrame {
 
         JPanel pRanking = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 15)); pRanking.setBorder(BorderFactory.createTitledBorder("2. Ranking e Pontuações"));
         pRanking.add(new JLabel("Ranking do Grupo:")); cbGruposClassificacao = novoComboBox(); pRanking.add(cbGruposClassificacao);
-        JButton btnRanking = new JButton("Exibir Classificação"); btnRanking.addActionListener(e -> { if (totalGrupos>0) {System.out.println("\n"); grupos[cbGruposClassificacao.getSelectedIndex()].classificacao();} }); pRanking.add(btnRanking);
+        JButton btnRanking = new JButton("Exibir Classificação");
+        btnRanking.addActionListener(e -> {
+            if (totalGrupos > 0) {
+                consoleArea.setText(""); // Limpa o console antes de exibir
+                exibirClassificacaoDoBanco((String) cbGruposClassificacao.getSelectedItem());
+            }
+        });
+        pRanking.add(btnRanking);
 
         panel.add(pEncerrar); panel.add(Box.createVerticalStrut(20)); panel.add(pRanking);
         JPanel wrapper = new JPanel(new BorderLayout()); wrapper.add(panel, BorderLayout.NORTH); return wrapper;
@@ -367,4 +407,323 @@ public class MainGUI extends JFrame {
         try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); } catch (Exception ignored) {}
         SwingUtilities.invokeLater(() -> new MainGUI().setVisible(true));
     }
+
+    private void salvarUsuarioNoBanco(Usuario u) {
+        String sql = "INSERT INTO usuarios (id, nome, pontuacao) VALUES (?, ?, ?)";
+
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, u.getId());
+            stmt.setString(2, u.getNome());
+            stmt.setInt(3, u.getPontuacao());
+
+            stmt.executeUpdate();
+            System.out.println("-> Usuário '" + u.getNome() + "' salvo no banco de dados H2 com sucesso!");
+
+        } catch (SQLException e) {
+            System.err.println("Erro ao salvar usuário no banco: " + e.getMessage());
+        }
+    }
+
+    private void salvarPartidaNoBanco(Partida p) {
+        String sql = "INSERT INTO partidas (id, time_mandante, time_visitante, data_partida, horario, gols_mandante, gols_visitante, realizada) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, p.getId());
+            stmt.setString(2, p.getTimeMandante());
+            stmt.setString(3, p.getTimeVisitante());
+            stmt.setObject(4, p.getData());
+            stmt.setObject(5, p.getHorario());
+            stmt.setInt(6, p.getGolsMandante());
+            stmt.setInt(7, p.getGolsVisitante());
+            stmt.setBoolean(8, p.isRealizada());
+
+            stmt.executeUpdate();
+            System.out.println("-> Partida '" + p.getNomePartida() + "' salva no banco de dados H2!");
+
+        } catch (SQLException e) {
+            System.err.println("Erro ao salvar partida no banco: " + e.getMessage());
+        }
+    }
+
+    private void atualizarPartidaNoBanco(Partida p) {
+        String sql = "UPDATE partidas SET gols_mandante = ?, gols_visitante = ?, realizada = ? WHERE id = ?";
+
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setInt(1, p.getGolsMandante());
+            stmt.setInt(2, p.getGolsVisitante());
+            stmt.setBoolean(3, p.isRealizada());
+            stmt.setString(4, p.getId());
+
+            stmt.executeUpdate();
+            System.out.println("-> Resultado da partida '" + p.getNomePartida() + "' atualizado no H2 com sucesso!");
+
+        } catch (SQLException e) {
+            System.err.println("Erro ao atualizar partida no banco: " + e.getMessage());
+        }
+    }
+
+    private void salvarApostaNoBanco(Aposta a) {
+        String sql = "INSERT INTO apostas (id, usuario_id, partida_id, time_ganhador, resultado, status) VALUES (?, ?, ?, ?, ?, ?)";
+
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, a.getId());
+            stmt.setString(2, a.getUsuario().getId());
+            stmt.setString(3, a.getPartida().getId());
+            stmt.setString(4, a.getTimeGanhador());
+            stmt.setString(5, a.getResultado());
+            stmt.setString(6, a.getStatus().name());
+
+            stmt.executeUpdate();
+            System.out.println("-> Aposta '" + a.getId() + "' salva no banco de dados H2!");
+
+        } catch (SQLException e) {
+            System.err.println("Erro ao salvar a aposta no banco: " + e.getMessage());
+        }
+    }
+
+    private void atualizarApostaNoBanco(Aposta a) {
+        String sql = "UPDATE apostas SET status = ? WHERE id = ?";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, a.getStatus().name());
+            stmt.setString(2, a.getId());
+            stmt.executeUpdate();
+        } catch (SQLException e) { System.err.println("Erro atualizar aposta: " + e.getMessage()); }
+    }
+
+    private void atualizarPontuacaoUsuarioNoBanco(Usuario u) {
+        String sql = "UPDATE usuarios SET pontuacao = ? WHERE id = ?";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setInt(1, u.getPontuacao());
+            stmt.setString(2, u.getId());
+            stmt.executeUpdate();
+        } catch (SQLException e) { System.err.println("Erro atualizar usuário: " + e.getMessage()); }
+    }
+
+    private void salvarGrupoNoBanco(Grupo g) {
+        String sql = "INSERT INTO grupos (nome) VALUES (?)";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, g.getNome());
+            stmt.executeUpdate();
+            System.out.println("-> Grupo '" + g.getNome() + "' salvo no banco de dados H2!");
+        } catch (SQLException e) { System.err.println("Erro ao salvar grupo: " + e.getMessage()); }
+    }
+
+    private void salvarMembroGrupoNoBanco(String nomeGrupo, String usuarioId) {
+        String sql = "INSERT INTO membros_grupo (grupo_nome, usuario_id, pontos_no_grupo) VALUES (?, ?, 0)";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, nomeGrupo);
+            stmt.setString(2, usuarioId);
+            stmt.executeUpdate();
+        } catch (SQLException e) { System.err.println("Erro ao vincular membro: " + e.getMessage()); }
+    }
+
+    private void carregarPartidasDoBanco() {
+        String sql = "SELECT * FROM partidas";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                String id = rs.getString("id");
+                String tm = rs.getString("time_mandante");
+                String tv = rs.getString("time_visitante");
+                java.sql.Date dataSql = rs.getDate("data_partida");
+                java.sql.Time horaSql = rs.getTime("horario");
+                int golsM = rs.getInt("gols_mandante");
+                int golsV = rs.getInt("gols_visitante");
+                boolean realizada = rs.getBoolean("realizada");
+
+                if (campeonato == null) processarCriarCampeonato("Campeonato Bolão", true);
+                if (!campeonato.timeExiste(tm)) processarAdicionarTime(tm, true);
+                if (!campeonato.timeExiste(tv)) processarAdicionarTime(tv, true);
+
+                // Converte os formatos do banco para String para usar no método da interface
+                String dataStr = dataSql.toLocalDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+                String horaStr = horaSql.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm"));
+
+                // Cria a partida na interface
+                processarAgendarPartida(tm, tv, dataStr, horaStr, true);
+
+                // Ajusta os dados da partida para ficarem idênticos ao banco
+                Partida p = partidas[totalPartidas - 1];
+                p.setId(id);
+                if (realizada) {
+                    p.setGolsMandante(golsM);
+                    p.setGolsVisitante(golsV);
+                    p.setRealizada(true);
+                }
+            }
+        } catch (SQLException e) { System.err.println("Erro carregar partidas: " + e.getMessage()); }
+    }
+
+    private void carregarApostasDoBanco() {
+        String sql = "SELECT * FROM apostas";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                String id = rs.getString("id");
+                String usuarioId = rs.getString("usuario_id");
+                String partidaId = rs.getString("partida_id");
+                String timeGanhador = rs.getString("time_ganhador");
+                String resultado = rs.getString("resultado");
+                String statusNome = rs.getString("status");
+
+                int idxUser = -1, idxPartida = -1;
+                for (int i = 0; i < totalUsuarios; i++) {
+                    if (usuarios[i].getId().equals(usuarioId)) { idxUser = i; break; }
+                }
+                for (int i = 0; i < totalPartidas; i++) {
+                    if (partidas[i].getId().equals(partidaId)) { idxPartida = i; break; }
+                }
+
+                if (idxUser != -1 && idxPartida != -1) {
+                    processarRegistrarAposta(idxUser, idxPartida, timeGanhador, resultado, true);
+
+                    Partida p = partidas[idxPartida];
+                    Aposta a = p.getApostas()[p.getTotalApostas() - 1];
+                    a.setId(id);
+                    a.setStatus(Aposta.Status.valueOf(statusNome));
+                }
+            }
+        } catch (SQLException e) { System.err.println("Erro carregar apostas: " + e.getMessage()); }
+    }
+
+        private void salvarCampeonatoNoBanco(String nome) {
+            String sql = "MERGE INTO campeonatos (nome) VALUES (?)";
+            try (Connection conn = ConexaoDB.conectar();
+                 PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, nome);
+                stmt.executeUpdate();
+            } catch (SQLException e) { System.err.println("Erro ao salvar campeonato: " + e.getMessage()); }
+        }
+
+    private void salvarTimeNoBanco(String nome) {
+        String sql = "MERGE INTO times (nome) VALUES (?)";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, nome);
+            stmt.executeUpdate();
+        } catch (SQLException e) { System.err.println("Erro ao salvar time: " + e.getMessage()); }
+    }
+
+    private void deletarCampeonatoDoBanco() {
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmtCamp = conn.prepareStatement("DELETE FROM campeonatos");
+             PreparedStatement stmtTimes = conn.prepareStatement("DELETE FROM times")) {
+            stmtTimes.executeUpdate();
+            stmtCamp.executeUpdate();
+        } catch (SQLException e) { System.err.println("Erro ao deletar campeonato: " + e.getMessage()); }
+    }
+
+    private void deletarTimeDoBanco(String nome) {
+        String sql = "DELETE FROM times WHERE nome = ?";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, nome);
+            stmt.executeUpdate();
+        } catch (SQLException e) { System.err.println("Erro ao deletar time: " + e.getMessage()); }
+    }
+
+    private void deletarGrupoDoBanco(String nome) {
+        String sql = "DELETE FROM grupos WHERE nome = ?";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, nome);
+            stmt.executeUpdate();
+
+        } catch (SQLException e) { System.err.println("Erro ao deletar grupo: " + e.getMessage()); }
+    }
+
+    private void deletarUsuarioDoBanco(String id) {
+        String sql = "DELETE FROM usuarios WHERE id = ?";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, id);
+            stmt.executeUpdate();
+
+        } catch (SQLException e) { System.err.println("Erro ao deletar usuário: " + e.getMessage()); }
+    }
+
+    private void deletarPartidaDoBanco(String id) {
+        String sql = "DELETE FROM partidas WHERE id = ?";
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, id);
+            stmt.executeUpdate();
+
+        } catch (SQLException e) { System.err.println("Erro ao deletar partida: " + e.getMessage()); }
+    }
+
+    private JButton criarBotaoApostar() {
+        JButton btnApostar = new JButton("Registrar Aposta");
+        btnApostar.addActionListener(e -> {
+            try {
+                String esc = (String) cbVencedorAposta.getSelectedItem();
+                Partida p = partidas[cbPartidasAposta.getSelectedIndex()];
+                String timeVencedor = esc.equals("Mandante") ? p.getTimeMandante() : esc.equals("Visitante") ? p.getTimeVisitante() : "empate";
+                processarRegistrarAposta(cbUsuariosAposta.getSelectedIndex(), cbPartidasAposta.getSelectedIndex(), timeVencedor, txtPlacarAposta.getText().trim(), false);
+                txtPlacarAposta.setText("");
+            } catch (Exception ex) {
+                mostrarErro(ex.getMessage());
+            }
+        });
+        return btnApostar;
+    }
+    private void exibirClassificacaoDoBanco(String nomeGrupo) {
+        System.out.println("=========================================");
+        System.out.println(" CLASSIFICAÇÃO: " + nomeGrupo.toUpperCase());
+        System.out.println("=========================================");
+
+        String sql = "SELECT u.nome, u.pontuacao FROM usuarios u " +
+                "JOIN membros_grupo m ON u.id = m.usuario_id " +
+                "WHERE m.grupo_nome = ? ORDER BY u.pontuacao DESC";
+
+        try (Connection conn = ConexaoDB.conectar();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, nomeGrupo);
+            ResultSet rs = stmt.executeQuery();
+
+            int posicao = 1;
+            boolean temGente = false;
+
+            while (rs.next()) {
+                temGente = true;
+                String nome = rs.getString("nome");
+                int pontos = rs.getInt("pontuacao");
+                System.out.println(posicao + "º Lugar: " + nome + " | Pontos: " + pontos);
+                posicao++;
+            }
+
+            if (!temGente) {
+                System.out.println("Nenhum usuário ativo neste grupo.");
+            }
+
+        } catch (SQLException e) {
+            System.err.println("Erro ao gerar classificação: " + e.getMessage());
+        }
+        System.out.println("=========================================\n");
+    }
 }
+

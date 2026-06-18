@@ -109,4 +109,10 @@ public class Partida {
     public int       getGolsMandante()  { return golsMandante; }
     public int       getGolsVisitante() { return golsVisitante; }
     public boolean   isRealizada()      { return realizada; }
+    public Aposta[] getApostas()       { return apostas; }
+    public int      getTotalApostas()  { return totalApostas; }
+    public void setId(String id) { this.id = id; }
+    public void setRealizada(boolean realizada) { this.realizada = realizada; }
+    public void setGolsMandante(int golsMandante) { this.golsMandante = golsMandante; }
+    public void setGolsVisitante(int golsVisitante) { this.golsVisitante = golsVisitante; }
 }

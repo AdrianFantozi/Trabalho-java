@@ -163,6 +163,8 @@ public class Aposta {
     public Status        getStatus()        { return status; }
     public LocalDateTime getMomentoAposta() { return momentoAposta; }
     public static int    totalApostas()     { return contadorAposta; }
+    public void setId(String id) { this.id = id; }
+    public void setStatus(Status status) { this.status = status; }
 
     @Override
     public String toString() {
